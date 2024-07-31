@@ -1,7 +1,17 @@
 {
   "manifest_version": 3,
-  "name": "Your Extension Name",
+  "name": "Schema Split View",
   "version": "1.0",
+  "permissions": [
+    "activeTab",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
   "background": {
     "service_worker": "background.js"
   },
@@ -11,16 +21,9 @@
       "js": ["content.js"]
     }
   ],
-  "permissions": [
-    "activeTab",
-    "storage"
-  ],
-  "action": {
-    "default_popup": "popup.html"
-  },
   "web_accessible_resources": [
     {
-      "resources": ["original_page.html"],
+      "resources": ["split_view.html"],
       "matches": ["<all_urls>"]
     }
   ]
