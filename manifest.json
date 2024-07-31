@@ -20,7 +20,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["split_view.html"],
+      "resources": ["original_page.html"],
       "matches": ["<all_urls>"]
     }
   ]

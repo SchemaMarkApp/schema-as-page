@@ -1,21 +1,13 @@
-document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('visualizeButton').addEventListener('click', () => {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-          const activeTab = tabs[0];
-          if (activeTab && activeTab.id) {
-              chrome.tabs.sendMessage(activeTab.id, { action: 'extractSchema' }, (response) => {
-                  if (chrome.runtime.lastError) {
-                      console.error('Error:', chrome.runtime.lastError.message || chrome.runtime.lastError);
-                  } else if (response && response.schema) {
-                      chrome.storage.local.set({
-                          jsonSchemas: response.schema,
-                          currentUrl: activeTab.url
-                      }, () => {
-                          chrome.tabs.create({ url: chrome.runtime.getURL('split_view.html') });
-                      });
-                  }
-              });
-          }
+document.getElementById('extractSchema').addEventListener('click', () => {
+  chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+    chrome.tabs.sendMessage(tabs[0].id, {action: 'extractSchema'}, (response) => {
+      const processedData = processSchemas(response.schemas);
+      const schemaHTML = generateHTML(processedData);
+      chrome.tabs.sendMessage(tabs[0].id, {
+        action: 'createSplitView',
+        originalContent: tabs[0].url,
+        schemaHTML: schemaHTML
       });
+    });
   });
 });
