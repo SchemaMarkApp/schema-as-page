@@ -96,34 +96,60 @@ function displaySchemaInfo(processedData) {
   }
 }
 
-function createSchemaBox(schemaObj) {
+function createSchemaBox(schemaObj, isNested = false) {
   const box = document.createElement('div');
-  box.className = 'schema-box';
-  box.innerHTML = `<h2>${schemaObj['@type']}</h2>`;
+  box.className = 'schema-box' + (isNested ? ' nested-schema-box' : '');
+  
+  if (schemaObj['@type']) {
+    const typeString = Array.isArray(schemaObj['@type']) ? schemaObj['@type'].join(', ') : schemaObj['@type'];
+    box.innerHTML = `<h2>${typeString}</h2>`;
+  }
 
   const content = document.createElement('dl');
 
   for (let key in schemaObj) {
     if (key !== '@type' && key !== '@context' && key !== '@id') {
       const dt = document.createElement('dt');
-      dt.textContent = key;
+      dt.textContent = key.charAt(0).toUpperCase() + key.slice(1);
       content.appendChild(dt);
 
       const dd = document.createElement('dd');
-      if (key === 'image' || key === 'logo' || schemaObj['@type'] === 'ImageObject') {
-        const imageUrl = typeof schemaObj[key] === 'object' ? schemaObj[key].url : schemaObj[key];
-        if (imageUrl) {
-          dd.innerHTML = `<img src="${imageUrl}" alt="${key}" style="max-width: 200px; max-height: 200px;">`;
-        } else if (schemaObj['@type'] === 'ImageObject' && schemaObj.url) {
-          dd.innerHTML = `<img src="${schemaObj.url}" alt="Image" style="max-width: 200px; max-height: 200px;">`;
+      
+      if (typeof schemaObj[key] === 'object' && schemaObj[key] !== null) {
+        if (schemaObj[key]['@type'] === 'ImageObject' || key === 'image') {
+          const imageObj = schemaObj[key];
+          const imageUrl = imageObj.url || imageObj.contentUrl || (typeof imageObj === 'string' ? imageObj : null);
+          
+          if (imageUrl && /\.(jpg|jpeg|png|gif|bmp|webp|svg)$/i.test(imageUrl)) {
+            dd.innerHTML = `<img src="${imageUrl}" alt="${imageObj.caption || key}" style="max-width: 200px; max-height: 200px;"><br>`;
+            if (imageObj.width) dd.innerHTML += `Width: ${imageObj.width}px<br>`;
+            if (imageObj.height) dd.innerHTML += `Height: ${imageObj.height}px<br>`;
+            if (imageObj.caption) dd.innerHTML += `Caption: ${imageObj.caption}<br>`;
+            if (imageObj.inLanguage) dd.innerHTML += `Language: ${imageObj.inLanguage}`;
+          } else {
+            // If it's not a recognizable image URL, display all properties
+            for (let imgKey in imageObj) {
+              if (imgKey !== '@type') {
+                dd.innerHTML += `${imgKey}: ${imageObj[imgKey]}<br>`;
+              }
+            }
+          }
+        } else {
+          dd.appendChild(createSchemaBox(schemaObj[key], true));
         }
-      } else if (key === 'sameAs' && Array.isArray(schemaObj[key])) {
-        dd.innerHTML = schemaObj[key].map(url => `<a href="${url}" target="_blank">${url}</a>`).join('<br>');
-      } else if (typeof schemaObj[key] === 'object' && !isEmptySchema(schemaObj[key])) {
-        dd.appendChild(createSchemaBox(schemaObj[key]));
-      } else if (typeof schemaObj[key] !== 'object') {
+      } else if (Array.isArray(schemaObj[key])) {
+        if (key === 'sameAs') {
+          dd.innerHTML = schemaObj[key].map(url => `<a href="${url}" target="_blank">${url}</a>`).join('<br>');
+        } else {
+          dd.innerHTML = schemaObj[key].join(', ');
+        }
+      } else if (typeof schemaObj[key] === 'string' && /\.(jpg|jpeg|png|gif|bmp|webp|svg)$/i.test(schemaObj[key])) {
+        // Handle case where the image URL is directly specified
+        dd.innerHTML = `<img src="${schemaObj[key]}" alt="${key}" style="max-width: 200px; max-height: 200px;">`;
+      } else {
         dd.textContent = schemaObj[key];
       }
+      
       content.appendChild(dd);
     }
   }
@@ -150,3 +176,15 @@ function createSplitView(originalTabId) {
     console.log('Split view created');
   });
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.body.addEventListener('error', function(e) {
+    if (e.target.tagName.toLowerCase() === 'img') {
+      console.error('Image failed to load:', e.target.src);
+      const errorText = document.createElement('span');
+      errorText.textContent = `Failed to load image: ${e.target.src}`;
+      errorText.style.color = 'red';
+      e.target.parentNode.insertBefore(errorText, e.target.nextSibling);
+    }
+  }, true);
+});
