@@ -1,19 +1,19 @@
 {
   "manifest_version": 3,
-  "name": "Schema Split View",
-  "version": "1.0",
+  "name": "Schema Insights",
+  "version": "1.2",
+  "description": "Extract and rank schema information from web pages",
   "permissions": [
     "activeTab",
+    "scripting",
     "tabs"
   ],
   "host_permissions": [
     "<all_urls>"
   ],
-  "action": {
-    "default_popup": "popup.html"
-  },
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
   "content_scripts": [
     {
@@ -21,10 +21,22 @@
       "js": ["content.js"]
     }
   ],
-  "web_accessible_resources": [
-    {
-      "resources": ["split_view.html"],
-      "matches": ["<all_urls>"]
-    }
-  ]
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "web_accessible_resources": [{
+    "resources": [
+      "ui_utils.js",
+      "split_view.html",
+      "split_view.js",
+      "split_view.css",
+      "schema_ranker.html",
+      "schema_ranker.js",
+      "schema_ranker.css"
+    ],
+    "matches": ["<all_urls>"]
+  }],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
 }

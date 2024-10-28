@@ -1,27 +1,21 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Schema Viewer</title>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
+    <title>Schema Split View</title>
     <link rel="stylesheet" href="split_view.css">
 </head>
 <body>
     <div id="content">
         <div id="left">
-          <header>
             <div id="websiteName"></div>
-          </header>
-          <nav id="headerNavigation"></nav>
-          <main>
-            <section id="descriptionBlock"></section>
-            <section id="schemaBoxes"></section>
-          </main>
-          <footer id="footerNavigation"></footer>
+            <div id="headerNavigation"></div>
+            <div id="descriptionBlock"></div>
+            <div id="schemaBoxes"></div>
+            <div id="footerNavigation"></div>
         </div>
         <div id="right"></div>
-      </div>
-    <script src="split_view.js"></script>
+    </div>
+    <script type="module" src="ui_utils.js"></script>
+    <script type="module" src="split_view.js"></script>
 </body>
 </html>
