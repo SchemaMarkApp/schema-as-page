@@ -452,26 +452,11 @@ if (!isHomePage(url.href)) {
   console.log('Path segments:', pathSegments);
 
   if (!hasBreadcrumb && pathSegments.length > 0) {
-    // Add combined schema recommendation
+    // First, show the breadcrumb recommendation
     recommendations.push({
-      type: 'Combined Schema: WebPage with BreadcrumbList',
-      message: 'Add a combined WebPage and BreadcrumbList schema to improve page indexing and navigation hierarchy.',
-      example: `{
-    "@type": "WebPage",
-    "@id": "schema:WebPage",
-    "url": "${url.href}",
-    "name": "${pageTitle}",
-    "description": "${pageDescription || 'Add a description of the page here'}",
-    "datePublished": "${currentDate}",
-    "dateModified": "${currentDate}",
-    "isPartOf": {
-      "@type": "WebSite",
-      "@id": "${websiteId}",
-      "url": "${websiteUrl}",
-      "name": "${websiteName}"
-    },
-    ${breadcrumbExample.slice(1, -1)}
-  }`,
+      type: 'Missing BreadcrumbList',
+      message: 'Add BreadcrumbList to help search engines understand the page hierarchy.',
+      example: breadcrumbExample,
       priority: 'high'
     });
   } else {
@@ -489,6 +474,7 @@ if (!isHomePage(url.href)) {
       }
     });
 
+    let hasIssues = false;
     breadcrumbSchemas.forEach(breadcrumb => {
       const issues = [];
       
@@ -515,6 +501,7 @@ if (!isHomePage(url.href)) {
       }
 
       if (issues.length > 0) {
+        hasIssues = true;
         recommendations.push({
           type: 'BreadcrumbList Format Issues',
           message: `Your BreadcrumbList schema has the following issues:\n${issues.map(issue => `• ${issue}`).join('\n')}`,
@@ -523,38 +510,92 @@ if (!isHomePage(url.href)) {
         });
       }
     });
+
+    // Add combined schema recommendation if there are issues
+    if (hasIssues) {
+      recommendations.push({
+        type: 'Complete Combined Schema Example',
+        message: 'Here is a complete example of WebPage schema with properly formatted BreadcrumbList:',
+        example: `{
+  "@type": "WebPage",
+  "@id": "schema:WebPage",
+  "url": "${url.href}",
+  "name": "${pageTitle}",
+  "description": "${pageDescription || 'Add a description of the page here'}",
+  "datePublished": "${currentDate}",
+  "dateModified": "${currentDate}",
+  "isPartOf": {
+    "@type": "WebSite",
+    "@id": "${websiteId}",
+    "url": "${websiteUrl}",
+    "name": "${websiteName}"
+  },
+  "breadcrumb": [
+    {
+      "@type": "BreadcrumbList",
+      "name": "BreadcrumbList",
+      "@id": "schema:BreadcrumbList",
+      "numberOfItems": ${pathSegments.length + 1},
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "@id": "schema:ListItem",
+          "name": "Home",
+          "item": "${websiteUrl}/"
+        },
+        ${pathSegments.map((segment, index) => {
+          const itemPath = pathSegments
+            .slice(0, index + 1)
+            .map(s => s.path)
+            .join('/');
+          return `{
+            "@type": "ListItem",
+            "position": ${index + 2},
+            "@id": "schema:ListItem",
+            "name": "${segment.name}",
+            "item": "${websiteUrl}/${itemPath}/"
+          }`
+        }).join(',\n          ')}
+      ]
+    }
+  ]
+}`,
+        priority: 'medium'
+      });
+    }
   }
 }
 
-    // Check other schemas
-    rankedSchemas.forEach(rankedSchema => {
-      const schema = rankedSchema.schema;
-      const schemaType = Array.isArray(schema['@type']) ? schema['@type'][0] : schema['@type'];
+// Check other schemas
+rankedSchemas.forEach(rankedSchema => {
+  const schema = rankedSchema.schema;
+  const schemaType = Array.isArray(schema['@type']) ? schema['@type'][0] : schema['@type'];
+  
+  // Check if this schema type has location recommendations
+  if (schemaLocationRecommendations[schemaType]) {
+    const recommendation = schemaLocationRecommendations[schemaType];
+    
+    // Check if schema is on the recommended page
+    if (!isOnRecommendedPage(schemaType, url.href)) {
+      recommendations.push({
+        type: `Schema Location: ${schemaType}`,
+        message: `This ${schemaType} schema would be more effective on your ${recommendation.suggestedPage}. ${recommendation.reason}`,
+        example: recommendation.example,
+        priority: 'high'
+      });
+    }
+    
+    // Add implementation recommendations for ContactPoint within Organization
+    if (schemaType === 'Organization') {
+      const hasContactPoint = schema.contactPoint || 
+                          (schema.hasOwnProperty('contactPoint') && Array.isArray(schema.contactPoint));
       
-      // Check if this schema type has location recommendations
-      if (schemaLocationRecommendations[schemaType]) {
-        const recommendation = schemaLocationRecommendations[schemaType];
-        
-        // Check if schema is on the recommended page
-        if (!isOnRecommendedPage(schemaType, url.href)) {
-          recommendations.push({
-            type: `Schema Location: ${schemaType}`,
-            message: `This ${schemaType} schema would be more effective on your ${recommendation.suggestedPage}. ${recommendation.reason}`,
-            example: recommendation.example,
-            priority: 'high'
-          });
-        }
-        
-        // Add implementation recommendations for ContactPoint within Organization
-        if (schemaType === 'Organization') {
-          const hasContactPoint = schema.contactPoint || 
-                              (schema.hasOwnProperty('contactPoint') && Array.isArray(schema.contactPoint));
-          
-          if (!hasContactPoint) {
-            recommendations.push({
-              type: 'Missing ContactPoint in Organization',
-              message: 'Consider adding a ContactPoint to your Organization schema to help users find your contact information.',
-              example: `{
+      if (!hasContactPoint) {
+        recommendations.push({
+          type: 'Missing ContactPoint in Organization',
+          message: 'Consider adding a ContactPoint to your Organization schema to help users find your contact information.',
+          example: `{
   "@type": "Organization",
   "contactPoint": {
     "@type": "ContactPoint",
@@ -564,29 +605,29 @@ if (!isHomePage(url.href)) {
     "availableLanguage": "English"
   }
 }`
-            });
-          }
-        }
+        });
       }
-    });
-
-    // Sort recommendations by priority
-    recommendations.sort((a, b) => {
-      if (a.priority === 'high' && b.priority !== 'high') return -1;
-      if (b.priority === 'high' && a.priority !== 'high') return 1;
-      return 0;
-    });
-
-  } catch (error) {
-    console.error('Error generating recommendations:', error);
-    recommendations.push({
-      type: 'Error',
-      message: `Error analyzing schemas: ${error.message}`,
-      example: 'Please check the console for more details.'
-    });
+    }
   }
+});
 
-  return recommendations;
+// Sort recommendations by priority
+recommendations.sort((a, b) => {
+  if (a.priority === 'high' && b.priority !== 'high') return -1;
+  if (b.priority === 'high' && a.priority !== 'high') return 1;
+  return 0;
+});
+
+} catch (error) {
+  console.error('Error generating recommendations:', error);
+  recommendations.push({
+    type: 'Error',
+    message: `Error analyzing schemas: ${error.message}`,
+    example: 'Please check the console for more details.'
+  });
+}
+
+return recommendations;
 }
 
 function displayRecommendations(recommendations) {
