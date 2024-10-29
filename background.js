@@ -106,7 +106,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       handleUrlStatusCheck(request, sendResponse);
       break;
     
-    case 'setOriginalTabUrl': 
+    case 'setOriginalTabUrl':  // Add this case
       handleSetOriginalUrl(request, sendResponse);
       break;
     
@@ -153,10 +153,25 @@ async function handleUrlStatusCheck(request, sendResponse) {
   }
 }
 
+// Add the new handleSetOriginalUrl function here
 function handleSetOriginalUrl(request, sendResponse) {
-  originalTabUrl = sanitizeUrl(request.url) || '';
-  console.log('Original tab URL set to:', originalTabUrl);
-  sendResponse({ success: true, url: originalTabUrl });
+  if (!request.url) {
+    sendResponse({ success: false, error: 'No URL provided' });
+    return;
+  }
+
+  try {
+    const url = new URL(request.url);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      throw new Error('Invalid URL protocol');
+    }
+    originalTabUrl = url.toString();
+    console.log('Original tab URL set to:', originalTabUrl);
+    sendResponse({ success: true, url: originalTabUrl });
+  } catch (error) {
+    console.error('Error setting original URL:', error);
+    sendResponse({ success: false, error: error.message });
+  }
 }
 
 function handleGetOriginalUrl(sendResponse) {

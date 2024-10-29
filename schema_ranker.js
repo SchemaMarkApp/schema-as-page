@@ -1,4 +1,5 @@
-import { showLoading, showError, clearStatus, debounce } from './ui_utils.js';
+import { showLoading, showError as showUIError, clearStatus, debounce } from './ui_utils.js';
+
 function addControlPanel() {
   const controlPanel = document.createElement('div');
   controlPanel.className = 'control-panel';
@@ -18,7 +19,7 @@ function addControlPanel() {
   `;
   document.body.insertBefore(controlPanel, document.getElementById('content'));
 
-  // Add event listeners
+  // Add event listeners using the proper selector method
   document.getElementById('gridViewBtn').addEventListener('click', () => toggleView('grid'));
   document.getElementById('stackViewBtn').addEventListener('click', () => toggleView('stack'));
   document.getElementById('expandAllBtn').addEventListener('click', expandAll);
@@ -56,9 +57,105 @@ function handleSchemaFilter(e) {
       }
   });
 }
-
 let domReady = false;
-
+const schemaLocationRecommendations = {
+  'Organization': {
+    suggestedPage: 'About page',
+    reason: 'Organization schema is best placed on your About or main company information page to establish your organizational identity.',
+    urlPattern: '/about',
+    example: `{
+  "@type": "Organization",
+  "@id": "schema:Organization",
+  "name": "Your Company Name",
+  "url": "https://www.example.com",
+  "logo": "https://www.example.com/logo.png",
+  "description": "About your company",
+  "address": {
+    "@type": "PostalAddress",
+    "streetAddress": "123 Business Street",
+    "addressLocality": "City",
+    "addressRegion": "State",
+    "postalCode": "12345",
+    "addressCountry": "Country"
+  }
+}`
+  },
+  'ContactPage': {
+    suggestedPage: 'Contact page',
+    reason: 'ContactPage schema should be implemented on your dedicated contact page to help search engines understand where users can reach you.',
+    urlPattern: '/contact',
+    example: `{
+  "@type": "ContactPage",
+  "@id": "schema:ContactPage",
+  "name": "Contact Us",
+  "url": "https://www.example.com/contact",
+  "description": "Get in touch with our team",
+  "mainEntity": {
+    "@type": "Organization",
+    "name": "Your Company Name",
+    "contactPoint": {
+      "@type": "ContactPoint",
+      "telephone": "+1-234-567-8900",
+      "contactType": "customer service",
+      "email": "contact@example.com",
+      "availableLanguage": "English"
+    }
+  }
+}`
+  },
+  'ContactPoint': {
+    suggestedPage: 'Contact page',
+    reason: 'ContactPoint schema is most effective when placed on your contact page, helping users find your contact information through search results.',
+    urlPattern: '/contact',
+    example: `{
+  "@type": "ContactPoint",
+  "@id": "schema:ContactPoint",
+  "telephone": "+1-234-567-8900",
+  "contactType": "customer service",
+  "email": "contact@example.com",
+  "availableLanguage": "English",
+  "areaServed": "Worldwide",
+  "hoursAvailable": "Mo-Fr 09:00-17:00"
+}`
+  }
+};
+function schemaError(elementId, message) {
+  const element = document.getElementById(elementId);
+  if (!element) return;
+  
+  // Create error element
+  const errorDiv = document.createElement('div');
+  errorDiv.className = 'error-message';
+  
+  // Add error content
+  errorDiv.innerHTML = `
+      <h3>Error</h3>
+      <p>${message}</p>
+      <button id="retryButton">Retry</button>
+  `;
+  
+  // Clear and add new content
+  element.innerHTML = '';
+  element.appendChild(errorDiv);
+  
+  // Add event listener to retry button
+  document.getElementById('retryButton').addEventListener('click', () => {
+      window.location.reload();
+  });
+}
+// Add this function to check if current URL matches suggested pattern
+function isOnRecommendedPage(schemaType, currentUrl) {
+  const recommendation = schemaLocationRecommendations[schemaType];
+  if (!recommendation) return true; // No recommendation for this type
+  
+  try {
+    const url = new URL(currentUrl);
+    return url.pathname.toLowerCase().includes(recommendation.urlPattern);
+  } catch (e) {
+    console.error('Error parsing URL:', e);
+    return false;
+  }
+}
 // Create the debounced function outside of processSchemas
 const processSchemaDebounced = debounce(processSchemas, 250);
 
@@ -164,6 +261,59 @@ function isSchemaType(key) {
 function shouldHaveId(obj) {
   return obj['@type'] !== undefined;
 }
+function isHomePage(url) {
+  try {
+    const parsedUrl = new URL(url);
+    const path = parsedUrl.pathname;
+    // Trim trailing slash for comparison
+    const cleanPath = path.endsWith('/') ? path.slice(0, -1) : path;
+    
+    // Debug log
+    console.log('Checking if homepage:', {
+      url: url,
+      path: path,
+      cleanPath: cleanPath,
+      isHome: cleanPath === '' || 
+              cleanPath.toLowerCase() === '/index.html' ||
+              cleanPath.toLowerCase() === '/index.php'
+    });
+    
+    return cleanPath === '' || 
+           cleanPath.toLowerCase() === '/index.html' ||
+           cleanPath.toLowerCase() === '/index.php';
+  } catch (e) {
+    console.error('Error parsing URL:', e);
+    return false;
+  }
+}
+
+function findBreadcrumbInSchema(schema) {
+  // Direct check
+  if (schema['@type'] === 'BreadcrumbList') {
+    return true;
+  }
+  
+  // Check in breadcrumb property
+  if (schema.breadcrumb) {
+    if (Array.isArray(schema.breadcrumb)) {
+      return schema.breadcrumb.some(item => item['@type'] === 'BreadcrumbList');
+    }
+    return schema.breadcrumb['@type'] === 'BreadcrumbList';
+  }
+  
+  // Check nested objects
+  if (typeof schema === 'object' && schema !== null) {
+    for (const key in schema) {
+      if (typeof schema[key] === 'object' && schema[key] !== null) {
+        if (findBreadcrumbInSchema(schema[key])) {
+          return true;
+        }
+      }
+    }
+  }
+  
+  return false;
+}
 
 function checkSchemaIds(schema, schemaType, recommendations, path = '') {
   if (shouldHaveId(schema)) {
@@ -204,14 +354,24 @@ function checkSchemaIds(schema, schemaType, recommendations, path = '') {
   }
 }
 
-async function generateRecommendations(rankedSchemas, pageTitle, pageDescription, homepageTitle) {
+async function generateRecommendations(rankedSchemas, pageTitle, pageDescription, homepageTitle, originalUrl) {
   const recommendations = [];
   processedIds.clear();
   
   try {
-    const url = new URL(window.location.href);
+    // Ensure we have a valid URL
+    if (!originalUrl) {
+      throw new Error('No valid URL provided');
+    }
+    
+    const url = new URL(originalUrl);
+    // Skip chrome-extension URLs
+    if (url.protocol === 'chrome-extension:') {
+      throw new Error('Invalid URL protocol');
+    }
+    
     const websiteUrl = `${url.protocol}//${url.hostname}`;
-
+      
     // Find WebSite schema
     const webSiteSchema = findSchemaType(rankedSchemas.map(s => s.schema), 'WebSite');
     const websiteName = webSiteSchema?.name || homepageTitle || url.hostname;
@@ -220,18 +380,56 @@ async function generateRecommendations(rankedSchemas, pageTitle, pageDescription
     // Get current date and time in ISO format
     const currentDate = new Date().toISOString();
 
+    const pathSegments = url.pathname.split('/')
+    .filter(segment => segment)
+    .map(segment => ({
+      name: segment
+        .split('-')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' '),
+      path: segment
+    }));
+    const breadcrumbExample = `{
+      "@type": "BreadcrumbList",
+      "name": "BreadcrumbList",
+      "@id": "schema:BreadcrumbList",
+      "numberOfItems": ${pathSegments.length + 1},
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "@id": "schema:ListItem",
+          "name": "Home",
+          "item": "${websiteUrl}/"
+        },
+        ${pathSegments.map((segment, index) => {
+          const itemPath = pathSegments
+            .slice(0, index + 1)
+            .map(s => s.path)
+            .join('/');
+          return `{
+            "@type": "ListItem",
+            "position": ${index + 2},
+            "@id": "schema:ListItem",
+            "name": "${segment.name}",
+            "item": "${websiteUrl}/${itemPath}/"
+          }`
+        }).join(',\n      ')}
+      ]
+    }`;
     // Find existing WebPage schema
     const existingWebPageSchema = findSchemaType(rankedSchemas.map(s => s.schema), 'WebPage');
+    const hasBreadcrumb = rankedSchemas.some(rs => findBreadcrumbInSchema(rs.schema));
 
-    // Check for WebPage schema
-    if (!existingWebPageSchema) {
-      recommendations.push({
-        type: 'Missing Schema: WebPage',
-        message: 'Add WebPage schema to improve page indexing and search appearance.',
-        example: `{
+// Check for WebPage schema
+if (!existingWebPageSchema) {
+  recommendations.push({
+    type: 'Missing Schema: WebPage',
+    message: 'Add WebPage schema to improve page indexing and search appearance.',
+    example: `{
   "@type": "WebPage",
   "@id": "schema:WebPage",
-  "url": "${window.location.href}",
+  "url": "${url.href}",
   "name": "${pageTitle}",
   "description": "${pageDescription || 'Add a description of the page here'}",
   "datePublished": "${currentDate}",
@@ -243,56 +441,140 @@ async function generateRecommendations(rankedSchemas, pageTitle, pageDescription
     "name": "${websiteName}"
   }
 }`
-      });
-    } else {
-      // Check for missing properties
-      const missingProperties = [];
-      const requiredProps = ['url', 'name', 'description', 'datePublished', 'dateModified', 'isPartOf'];
-      
-      for (const prop of requiredProps) {
-        if (!existingWebPageSchema[prop]) {
-          missingProperties.push(prop);
+  });
+}
+
+// Check for breadcrumbs only if not homepage
+if (!isHomePage(url.href)) {
+  console.log('Not homepage, checking breadcrumbs');
+  const hasBreadcrumb = rankedSchemas.some(rs => findBreadcrumbInSchema(rs.schema));
+  console.log('Has breadcrumb:', hasBreadcrumb);
+  console.log('Path segments:', pathSegments);
+
+  if (!hasBreadcrumb && pathSegments.length > 0) {
+    // Add combined schema recommendation
+    recommendations.push({
+      type: 'Combined Schema: WebPage with BreadcrumbList',
+      message: 'Add a combined WebPage and BreadcrumbList schema to improve page indexing and navigation hierarchy.',
+      example: `{
+    "@type": "WebPage",
+    "@id": "schema:WebPage",
+    "url": "${url.href}",
+    "name": "${pageTitle}",
+    "description": "${pageDescription || 'Add a description of the page here'}",
+    "datePublished": "${currentDate}",
+    "dateModified": "${currentDate}",
+    "isPartOf": {
+      "@type": "WebSite",
+      "@id": "${websiteId}",
+      "url": "${websiteUrl}",
+      "name": "${websiteName}"
+    },
+    ${breadcrumbExample.slice(1, -1)}
+  }`,
+      priority: 'high'
+    });
+  } else {
+    // Check existing breadcrumb format in all schemas
+    const breadcrumbSchemas = [];
+    rankedSchemas.forEach(rs => {
+      if (rs.schema['@type'] === 'BreadcrumbList') {
+        breadcrumbSchemas.push(rs.schema);
+      } else if (rs.schema.breadcrumb) {
+        if (Array.isArray(rs.schema.breadcrumb)) {
+          breadcrumbSchemas.push(...rs.schema.breadcrumb.filter(item => item['@type'] === 'BreadcrumbList'));
+        } else if (rs.schema.breadcrumb['@type'] === 'BreadcrumbList') {
+          breadcrumbSchemas.push(rs.schema.breadcrumb);
         }
       }
+    });
 
-      if (missingProperties.length > 0) {
-        recommendations.push({
-          type: 'Incomplete Schema: WebPage',
-          message: `The WebPage schema is missing the following properties: ${missingProperties.join(', ')}`,
-          example: `{
-  "@type": "WebPage",
-  "@id": "schema:WebPage",
-  "url": "${existingWebPageSchema.url || window.location.href}",
-  "name": "${existingWebPageSchema.name || pageTitle}",
-  "description": "${existingWebPageSchema.description || pageDescription || 'Add a description of the page here'}",
-  "datePublished": "${existingWebPageSchema.datePublished || currentDate}",
-  "dateModified": "${existingWebPageSchema.dateModified || currentDate}",
-  "isPartOf": {
-    "@type": "WebSite",
-    "@id": "${websiteId}",
-    "url": "${websiteUrl}",
-    "name": "${websiteName}"
-  }
-}`
+    breadcrumbSchemas.forEach(breadcrumb => {
+      const issues = [];
+      
+      if (!breadcrumb['@id']) {
+        issues.push('Missing @id property');
+      }
+      if (!breadcrumb.numberOfItems) {
+        issues.push('Missing numberOfItems property');
+      }
+      if (!Array.isArray(breadcrumb.itemListElement)) {
+        issues.push('itemListElement should be an array');
+      } else {
+        breadcrumb.itemListElement.forEach((item, index) => {
+          if (item.position !== index + 1) {
+            issues.push(`Invalid position value at index ${index}`);
+          }
+          if (!item['@id']) {
+            issues.push(`Missing @id for ListItem at position ${index + 1}`);
+          }
+          if (!item.item) {
+            issues.push(`Missing item URL at position ${index + 1}`);
+          }
         });
       }
 
-      // Check @id format and nested schemas
-      checkSchemaIds(existingWebPageSchema, 'WebPage', recommendations);
-    }
+      if (issues.length > 0) {
+        recommendations.push({
+          type: 'BreadcrumbList Format Issues',
+          message: `Your BreadcrumbList schema has the following issues:\n${issues.map(issue => `• ${issue}`).join('\n')}`,
+          example: breadcrumbExample,
+          priority: 'medium'
+        });
+      }
+    });
+  }
+}
 
     // Check other schemas
     rankedSchemas.forEach(rankedSchema => {
       const schema = rankedSchema.schema;
-      if (schema['@graph'] && Array.isArray(schema['@graph'])) {
-        schema['@graph'].forEach((item, index) => {
-          checkSchemaIds(item, item['@type'] || `Graph[${index}]`, recommendations, `@graph[${index}]`);
-        });
-      } else if (schema['@graph']) {
-        checkSchemaIds(schema['@graph'], schema['@graph']['@type'] || 'Graph', recommendations, '@graph');
-      } else {
-        checkSchemaIds(schema, schema['@type'] || 'Unknown', recommendations);
+      const schemaType = Array.isArray(schema['@type']) ? schema['@type'][0] : schema['@type'];
+      
+      // Check if this schema type has location recommendations
+      if (schemaLocationRecommendations[schemaType]) {
+        const recommendation = schemaLocationRecommendations[schemaType];
+        
+        // Check if schema is on the recommended page
+        if (!isOnRecommendedPage(schemaType, url.href)) {
+          recommendations.push({
+            type: `Schema Location: ${schemaType}`,
+            message: `This ${schemaType} schema would be more effective on your ${recommendation.suggestedPage}. ${recommendation.reason}`,
+            example: recommendation.example,
+            priority: 'high'
+          });
+        }
+        
+        // Add implementation recommendations for ContactPoint within Organization
+        if (schemaType === 'Organization') {
+          const hasContactPoint = schema.contactPoint || 
+                              (schema.hasOwnProperty('contactPoint') && Array.isArray(schema.contactPoint));
+          
+          if (!hasContactPoint) {
+            recommendations.push({
+              type: 'Missing ContactPoint in Organization',
+              message: 'Consider adding a ContactPoint to your Organization schema to help users find your contact information.',
+              example: `{
+  "@type": "Organization",
+  "contactPoint": {
+    "@type": "ContactPoint",
+    "telephone": "+1-234-567-8900",
+    "contactType": "customer service",
+    "email": "contact@example.com",
+    "availableLanguage": "English"
+  }
+}`
+            });
+          }
+        }
       }
+    });
+
+    // Sort recommendations by priority
+    recommendations.sort((a, b) => {
+      if (a.priority === 'high' && b.priority !== 'high') return -1;
+      if (b.priority === 'high' && a.priority !== 'high') return 1;
+      return 0;
     });
 
   } catch (error) {
@@ -331,11 +613,151 @@ function displayRecommendations(recommendations) {
     recommendationsElem.appendChild(recBox);
   });
 }
+// Add these functions to schema_ranker.js
 
+function createSearchBox() {
+  const searchDiv = document.createElement('div');
+  searchDiv.className = 'search-container';
+  searchDiv.innerHTML = `
+      <div class="search-box">
+          <input type="text" id="schemaSearch" placeholder="Search in schemas...">
+          <button id="clearSearch">×</button>
+      </div>
+      <div class="search-options">
+          <label><input type="checkbox" id="caseSensitive"> Case sensitive</label>
+          <label><input type="checkbox" id="wholeWord"> Whole word</label>
+          <select id="searchTarget">
+              <option value="both">Search everywhere</option>
+              <option value="schemas">Schemas only</option>
+              <option value="recommendations">Recommendations only</option>
+          </select>
+          <span id="searchResults"></span>
+      </div>
+  `;
+  
+  // Insert search box into control panel
+  const controlPanel = document.querySelector('.controls');
+  controlPanel.appendChild(searchDiv);
+
+  // Add event listeners
+  const searchInput = document.getElementById('schemaSearch');
+  const clearButton = document.getElementById('clearSearch');
+  const caseSensitive = document.getElementById('caseSensitive');
+  const wholeWord = document.getElementById('wholeWord');
+  const searchTarget = document.getElementById('searchTarget');
+
+  let searchTimeout;
+
+  searchInput.addEventListener('input', () => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+          performSearch();
+      }, 300);
+  });
+
+  clearButton.addEventListener('click', () => {
+      searchInput.value = '';
+      performSearch();
+      searchInput.focus();
+  });
+
+  caseSensitive.addEventListener('change', performSearch);
+  wholeWord.addEventListener('change', performSearch);
+  searchTarget.addEventListener('change', performSearch);
+}
+
+function performSearch() {
+  const searchInput = document.getElementById('schemaSearch');
+  const searchTerm = searchInput.value;
+  const caseSensitive = document.getElementById('caseSensitive').checked;
+  const wholeWord = document.getElementById('wholeWord').checked;
+  const searchTarget = document.getElementById('searchTarget').value;
+  const resultSpan = document.getElementById('searchResults');
+
+  // Clear previous highlights
+  clearHighlights();
+
+  if (!searchTerm) {
+      resultSpan.textContent = '';
+      return;
+  }
+
+  let matchCount = 0;
+  const term = caseSensitive ? searchTerm : searchTerm.toLowerCase();
+
+  // Function to test if a string matches the search criteria
+  const matchesSearch = (text) => {
+      const testText = caseSensitive ? text : text.toLowerCase();
+      if (wholeWord) {
+          const regex = new RegExp(`\\b${term}\\b`, caseSensitive ? 'g' : 'gi');
+          return regex.test(testText);
+      }
+      return testText.includes(term);
+  };
+
+  // Function to highlight matches in an element
+  const highlightMatches = (element, searchIn) => {
+      const walker = document.createTreeWalker(
+          element,
+          NodeFilter.SHOW_TEXT,
+          null,
+          false
+      );
+
+      let node;
+      while (node = walker.nextNode()) {
+          const text = node.textContent;
+          if (matchesSearch(text)) {
+              const regex = wholeWord ? 
+                  new RegExp(`\\b${term}\\b`, caseSensitive ? 'g' : 'gi') :
+                  new RegExp(term, caseSensitive ? 'g' : 'gi');
+              
+              const highlighted = text.replace(regex, match => `<mark class="search-highlight">${match}</mark>`);
+              if (highlighted !== text) {
+                  const span = document.createElement('span');
+                  span.innerHTML = highlighted;
+                  node.parentNode.replaceChild(span, node);
+                  matchCount++;
+              }
+          }
+      }
+  };
+
+  // Search in schemas
+  if (searchTarget !== 'recommendations') {
+      const schemasDiv = document.getElementById('rawSchemas');
+      highlightMatches(schemasDiv);
+  }
+
+  // Search in recommendations
+  if (searchTarget !== 'schemas') {
+      const recommendationsDiv = document.getElementById('recommendations');
+      highlightMatches(recommendationsDiv);
+  }
+
+  // Update result count
+  resultSpan.textContent = matchCount ? 
+      `${matchCount} match${matchCount === 1 ? '' : 'es'} found` : 
+      'No matches found';
+}
+
+function clearHighlights() {
+  document.querySelectorAll('.search-highlight').forEach(highlight => {
+      const parent = highlight.parentNode;
+      parent.replaceChild(document.createTextNode(highlight.textContent), highlight);
+      // Clean up empty spans
+      if (parent.tagName === 'SPAN' && !parent.innerHTML.trim()) {
+          parent.parentNode.removeChild(parent);
+      }
+  });
+}
+
+// Modify your init function to include search initialization
 function init() {
   console.log('Initializing...');
   makeAccessible();
-  addControlPanel(); // Add this line
+  addControlPanel();
+  createSearchBox(); // Add this line
 }
 
 function initializeExtension() {
@@ -349,12 +771,18 @@ function initializeExtension() {
     
     if (request.action === 'rankSchemas') {
       console.log('Ranking schemas:', request.data);
+      
+      // Get URL from request data or sender
+      const url = request.data?.url || sender.tab?.url;
+      console.log('URL from request:', url); // Debug log
+      
       if (domReady) {
         processSchemaDebounced(
           request.data.schemas, 
           request.data.pageTitle, 
           request.data.pageDescription, 
-          request.data.homepageTitle
+          request.data.homepageTitle,
+          url
         );
       } else {
         document.addEventListener('DOMContentLoaded', () => {
@@ -362,7 +790,8 @@ function initializeExtension() {
             request.data.schemas, 
             request.data.pageTitle, 
             request.data.pageDescription, 
-            request.data.homepageTitle
+            request.data.homepageTitle,
+            url
           );
         });
       }
@@ -379,23 +808,50 @@ async function processSchemas(schemas, pageTitle, pageDescription, homepageTitle
   try {
     displayRawSchemas(schemas);
     const rankedSchemas = rankSchemas(schemas);
+    
+    // Try to get URL from multiple sources
+    let url;
+    try {
+      const response = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({ action: 'getOriginalTabUrl' }, resolve);
+      });
+      
+      url = response?.url;
+      
+      if (!url) {
+        // Fallback to trying to get URL from schemas
+        const webPageSchema = rankedSchemas.find(s => s.schema['@type'] === 'WebPage');
+        url = webPageSchema?.schema?.url;
+      }
+      
+      if (!url) {
+        throw new Error('No URL returned from background script');
+      }
+    } catch (error) {
+      throw new Error('Unable to determine page URL: ' + error.message);
+    }
+
+    console.log('Using URL:', url); // Debug log
+
     const recommendations = await generateRecommendations(
       rankedSchemas, 
       pageTitle, 
       pageDescription, 
-      homepageTitle
+      homepageTitle,
+      url
     );
+    
     displayRecommendations(recommendations);
     clearStatus('rawSchemas');
   } catch (error) {
     console.error('Error processing schemas:', error);
-    showError('rawSchemas', error.message);
+    schemaError('rawSchemas', error.message);
   }
 }
 
 window.addEventListener('error', (event) => {
   console.error('View error:', event.error);
-  showError('rawSchemas', event.error.message);
+  schemaError('rawSchemas', event.error.message); // Use the renamed error handler
 });
 
 document.addEventListener('DOMContentLoaded', () => {

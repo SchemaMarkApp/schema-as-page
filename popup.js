@@ -5,23 +5,33 @@ document.addEventListener('DOMContentLoaded', function() {
   const rankButton = document.getElementById('rankSchemas');
   
   if (processButton) {
-      processButton.addEventListener('click', function() {
-          console.log('Process Schemas button clicked');
-          this.textContent = 'Processing...';
-          executeAction('processSchemas', 'split_view.html');
-      });
+    processButton.addEventListener('click', function() {
+      console.log('Process Schemas button clicked');
+      this.textContent = 'Processing...';
+      executeAction('processSchemas', 'split_view.html')
+        .catch(error => {
+          console.error('Error:', error);
+          this.textContent = 'Process Schemas';
+          alert(`Error: ${error.message}`);
+        });
+    });
   } else {
-      console.error('Process Schemas button not found');
+    console.error('Process Schemas button not found');
   }
   
   if (rankButton) {
-      rankButton.addEventListener('click', function() {
-          console.log('Rank Schemas button clicked');
-          this.textContent = 'Ranking...';
-          executeAction('rankSchemas', 'schema_ranker.html');
-      });
+    rankButton.addEventListener('click', function() {
+      console.log('Rank Schemas button clicked');
+      this.textContent = 'Ranking...';
+      executeAction('rankSchemas', 'schema_ranker.html')
+        .catch(error => {
+          console.error('Error:', error);
+          this.textContent = 'Rank Schemas';
+          alert(`Error: ${error.message}`);
+        });
+    });
   } else {
-      console.error('Rank Schemas button not found');
+    console.error('Rank Schemas button not found');
   }
 });
 
@@ -29,85 +39,91 @@ async function executeAction(action, htmlFile) {
   console.log(`Executing action: ${action}`);
   
   try {
-      // Get active tab
-      const tabs = await chrome.tabs.query({active: true, currentWindow: true});
-      if (!tabs || tabs.length === 0) {
-          throw new Error('No active tab found');
-      }
-      const activeTab = tabs[0];
-      console.log('Active tab:', activeTab);
+    // Get active tab
+    const [activeTab] = await chrome.tabs.query({active: true, currentWindow: true});
+    if (!activeTab?.url) {
+      throw new Error('No active tab URL found');
+    }
 
-      // Send message to content script
-      const response = await new Promise((resolve, reject) => {
-          chrome.tabs.sendMessage(activeTab.id, {action: action}, function(response) {
-              if (chrome.runtime.lastError) {
-                  reject(chrome.runtime.lastError);
-              } else if (!response || !response.schemas) {
-                  reject(new Error('Invalid response from content script'));
-              } else {
-                  resolve(response);
-              }
-          });
+    // Set the URL in background script first
+    await new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({
+        action: 'setOriginalTabUrl',
+        url: activeTab.url
+      }, (response) => {
+        if (!response?.success) {
+          reject(new Error('Failed to set original URL'));
+          return;
+        }
+        resolve();
       });
+    });
 
-      // Create new tab
-      const newTab = await new Promise((resolve, reject) => {
-          chrome.tabs.create({
-              url: chrome.runtime.getURL(htmlFile),
-              active: true
-          }, function(tab) {
-              if (chrome.runtime.lastError) {
-                  reject(chrome.runtime.lastError);
-              } else {
-                  resolve(tab);
-              }
-          });
+    // Send message to content script
+    const response = await new Promise((resolve, reject) => {
+      chrome.tabs.sendMessage(activeTab.id, {
+        action: action,
+        currentUrl: activeTab.url
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        if (!response || !response.schemas) {
+          reject(new Error('Invalid response from content script'));
+          return;
+        }
+        resolve(response);
       });
+    });
 
-      // Wait for tab to load and send message
-      await new Promise((resolve, reject) => {
-          function sendMessageToNewTab(retryCount = 0) {
-              if (retryCount > 10) {
-                  reject(new Error('Failed to send message after 10 retries'));
-                  return;
-              }
+    // Create new tab and pass URL
+    const newTab = await chrome.tabs.create({
+      url: chrome.runtime.getURL(htmlFile),
+      active: true
+    });
 
-              chrome.tabs.sendMessage(newTab.id, {
-                  action: action,
-                  data: {
-                      schemas: response.schemas,
-                      pageTitle: response.pageTitle,
-                      pageDescription: response.pageDescription,
-                      homepageTitle: response.homepageTitle,
-                      originalTabId: activeTab.id
-                  }
-              }, function(response) {
-                  if (chrome.runtime.lastError) {
-                      console.warn(`Retry ${retryCount + 1}: ${chrome.runtime.lastError.message}`);
-                      setTimeout(() => sendMessageToNewTab(retryCount + 1), 100);
-                  } else {
-                      console.log('Data sent successfully to new tab');
-                      resolve();
-                  }
-              });
+    // Wait for tab to load and send data with URL
+    await new Promise((resolve, reject) => {
+      let retryCount = 0;
+      const maxRetries = 10;
+
+      function sendMessageToNewTab() {
+        if (retryCount >= maxRetries) {
+          reject(new Error('Failed to send message after multiple attempts'));
+          return;
+        }
+
+        chrome.tabs.sendMessage(newTab.id, {
+          action: action,
+          data: {
+            schemas: response.schemas,
+            pageTitle: response.pageTitle,
+            pageDescription: response.pageDescription,
+            homepageTitle: response.homepageTitle,
+            url: activeTab.url,  // Explicitly include URL
+            originalTabId: activeTab.id
           }
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            retryCount++;
+            setTimeout(sendMessageToNewTab, 100);
+            return;
+          }
+          resolve();
+        });
+      }
 
-          chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
-              if (tabId === newTab.id && info.status === 'complete') {
-                  chrome.tabs.onUpdated.removeListener(listener);
-                  sendMessageToNewTab();
-              }
-          });
+      chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
+        if (tabId === newTab.id && info.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          sendMessageToNewTab();
+        }
       });
+    });
 
   } catch (error) {
-      console.error('Error executing action:', error);
-      // Reset button text
-      const button = document.getElementById(action === 'processSchemas' ? 'processSchemas' : 'rankSchemas');
-      if (button) {
-          button.textContent = action === 'processSchemas' ? 'Process Schemas' : 'Rank Schemas';
-      }
-      // Show error to user
-      alert(`Error: ${error.message}`);
+    console.error('Error executing action:', error);
+    throw error;
   }
 }
