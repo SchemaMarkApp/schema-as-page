@@ -80,7 +80,36 @@ body {
     max-width: 1600px;
     margin: 0 auto;
 }
-
+.grid-view .schema-box {
+    display: inline-block;
+    width: calc(50% - 20px);
+    margin: 10px;
+    vertical-align: top;
+  }
+  
+  .stack-view .schema-box {
+    display: block;
+    width: 100%;
+    margin: 10px 0;
+  }
+  
+  .highlighted {
+    border: 2px solid #007bff;
+    background-color: #f8f9fa;
+  }
+  .schema-title {
+    padding: 10px;
+    margin: 0;
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #dee2e6;
+    font-size: 1.1rem;
+    color: #495057;
+  }
+  
+  .schema-box pre {
+    margin: 0;
+    padding: 15px;
+  }
 #left-panel, #right-panel {
     background: #fff;
     padding: 20px;

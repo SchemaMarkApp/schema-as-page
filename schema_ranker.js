@@ -29,7 +29,14 @@ function addControlPanel() {
 
 function toggleView(type) {
   const content = document.getElementById('content');
+  const gridBtn = document.getElementById('gridViewBtn');
+  const stackBtn = document.getElementById('stackViewBtn');
+  
   content.className = type === 'grid' ? 'grid-view' : 'stack-view';
+  
+  // Update button states
+  gridBtn.classList.toggle('active', type === 'grid');
+  stackBtn.classList.toggle('active', type === 'stack');
 }
 
 function expandAll() {
@@ -45,17 +52,28 @@ function collapseAll() {
 }
 
 function handleSchemaFilter(e) {
-  const value = e.target.value;
-  const schemaBoxes = document.querySelectorAll('.schema-box');
+  const value = e.target.value.toLowerCase();
+  const schemaBoxes = Array.from(document.querySelectorAll('.schema-box'));
   
   schemaBoxes.forEach(box => {
-      if (value === 'all') {
-          box.style.display = 'block';
-      } else {
-          const schemaContent = box.textContent.toLowerCase();
-          box.style.display = schemaContent.includes(value) ? 'block' : 'none';
-      }
+    if (value === 'all') {
+      box.style.display = 'block';
+      box.classList.remove('highlighted');
+    } else {
+      const schemaContent = box.textContent.toLowerCase();
+      const matches = schemaContent.includes(value);
+      box.style.display = matches ? 'block' : 'none';
+      box.classList.toggle('highlighted', matches);
+    }
   });
+
+  // Sort matching schemas to top
+  if (value !== 'all') {
+    const container = document.getElementById('rawSchemas');
+    schemaBoxes
+      .filter(box => box.style.display !== 'none')
+      .forEach(box => container.appendChild(box));
+  }
 }
 let domReady = false;
 const schemaLocationRecommendations = {
@@ -215,8 +233,22 @@ function displayRawSchemas(schemas) {
     schemas.forEach((schema, index) => {
       const schemaBox = document.createElement('div');
       schemaBox.className = 'schema-box';
+      
+      // Get schema type(s)
+      let schemaType = schema['@type'];
+      if (Array.isArray(schemaType)) {
+        schemaType = schemaType.join(', ');
+      }
+      
+      // Create a more descriptive title
+      const title = schemaType 
+        ? `Schema ${index + 1} - "${schemaType}"`
+        : schema.name 
+          ? `Schema ${index + 1} - "${schema.name}"`
+          : `Schema ${index + 1}`;
+
       schemaBox.innerHTML = `
-        <h3>Schema ${index + 1}</h3>
+        <h3 class="schema-title">${title}</h3>
         <pre>${JSON.stringify(schema, null, 2)}</pre>
       `;
       rawSchemasElem.appendChild(schemaBox);
@@ -714,6 +746,10 @@ function performSearch() {
   const wholeWord = document.getElementById('wholeWord').checked;
   const searchTarget = document.getElementById('searchTarget').value;
   const resultSpan = document.getElementById('searchResults');
+  const firstMatch = document.querySelector('.search-highlight');
+  if (firstMatch) {
+    firstMatch.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
 
   // Clear previous highlights
   clearHighlights();
@@ -766,8 +802,14 @@ function performSearch() {
 
   // Search in schemas
   if (searchTarget !== 'recommendations') {
-      const schemasDiv = document.getElementById('rawSchemas');
-      highlightMatches(schemasDiv);
+    const schemaBoxes = Array.from(document.querySelectorAll('.schema-box'));
+    schemaBoxes.sort((a, b) => {
+      const aMatches = a.querySelectorAll('.search-highlight').length;
+      const bMatches = b.querySelectorAll('.search-highlight').length;
+      return bMatches - aMatches; // Sort descending (most matches first)
+    });
+    const container = document.getElementById('rawSchemas');
+    schemaBoxes.forEach(box => container.appendChild(box));
   }
 
   // Search in recommendations
